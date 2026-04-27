@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>Triage Detector v1.5 - Auto-Session Pro</title>
+    <title>Triage Detector v1.7 - Institutional Auditor</title>
     <style>
         :root {
             --bg-dark: #0a0e14; --card-bg: #161b22; --text-main: #adbac7;
@@ -18,7 +18,6 @@
         input, select, textarea { background: #22272e; border: 1px solid var(--border-color); color: white; padding: 6px; border-radius: 4px; font-size: 0.85rem; }
         table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 0.95rem; }
         th, td { padding: 10px; text-align: left; border-bottom: 1px solid #2d333b; }
-        /* Tactical Columns */
         .ticker-col { color: white; font-weight: 800; font-size: 1.1rem; }
         .price-col { color: var(--highlight); font-family: monospace; font-weight: bold; }
         .range-col { color: #8b949e; font-size: 0.85rem; }
@@ -36,12 +35,11 @@
 
 <header>
     <div style="display:flex; gap:10px; align-items:center;">
-        <select id="dataSource" onchange="toggleMode()">
+        <select id="dataSource">
             <option value="sim">Simulation Mode</option>
             <option value="live">Live Tradier API</option>
         </select>
         <input type="password" id="apiKey" placeholder="Tradier API Key">
-        <input type="text" id="sessionIdDisplay" placeholder="Session ID (Auto)" readonly style="width: 120px; opacity: 0.6">
         <button class="btn" style="background:#444c56; color:white" onclick="saveKeys()">Save Key</button>
     </div>
     <div id="status">Status: <span id="conn-status" style="color:var(--highlight)">Standby</span> | <span id="clock">00:00:00</span></div>
@@ -58,7 +56,7 @@
         <div class="control-group">
             <label>Spread Safety ($): <span id="val-maxSpread">0.05</span></label>
             <div style="display:flex;gap:5px;align-items:center;">
-                <input type="checkbox" id="param(spreadEnabled)" onchange="updateParams()">
+                <input type="checkbox" id="param-spreadEnabled" onchange="updateParams()">
                 <input type="range" id="param-maxSpread" min="0.01" max="0.50" step="0.01" value="0.05" oninput="updateParams()">
             </div>
         </div>
@@ -66,23 +64,23 @@
     </div>
 
     <div class="panel">
-        <div style="font-weight:bold; color: var(--accent-green); margin-bottom:10px; font-size: 1.1rem">THE ARENA (Active Momentum)</div>
+        <div style="font-weight:bold; color: var(--accent-green); margin-bottom:10px; font-size: 1.1rem">THE ARENA</div>
         <table>
-            <thead><tr><th>Ticker</th><th>Price</th><th>High/Low</th><th>%Chg</th><th>Spread</th><th>OFI Meter</th><th>Actions</th></tr></thead>
+            <thead><tr><th>Stock Ticker</th><th>Price</th><th>High/Low</th><th>%Chg</th><th>Spread</th><th>OFI Meter</th><th>Actions</th></tr></thead>
             <tbody id="arena-body"></tbody>
         </table>
     </div>
 
     <div class="panel" style="display:flex; gap:12px; align-items:center;">
-        <textarea id="tickerInput" style="flex:1; height:45px" placeholder="Paste Tickers from TOS (e.g. NVDA, AAPL, SPY)"></textarea>
+        <textarea id="tickerInput" style="flex:1; height:45px" placeholder="Paste Tickers (NVDA, AAPL, SPY)"></textarea>
         <button id="startBtn" class="btn btn-green" onclick="startEngine()">Commence Stream</button>
         <button id="pauseBtn" class="btn btn-yellow" onclick="pauseEngine()" disabled>Pause</button>
     </div>
 
     <div class="panel">
-        <div style="font-weight:bold; margin-bottom:10px; color: #8b949e;">BULLPEN (Candidates & History)</div>
+        <div style="font-weight:bold; margin-bottom:10px; color: #8b949e;">BULLPEN</div>
         <table>
-            <thead><tr><th>Ticker</th><th>Price</th><th>High/Low</th><th>%Chg</th><th>Spread</th><th>OFI</th><th>Arena History</th></tr></thead>
+            <thead><tr><th>Stock Ticker</th><th>Price</th><th>High/Low</th><th>%Chg</th><th>Spread</th><th>OFI</th><th>Arena History</th></tr></thead>
             <tbody id="bullpen-body"></tbody>
         </table>
     </div>
@@ -93,48 +91,40 @@
     let engineActive = false; let streamInterval = null; let socket = null;
     let params = { ofiEntry: 3.0, ofiExit: 1.5, vwapMax: 1.0, spreadEnabled: false, maxSpread: 0.05 };
 
-    // 1. Initialization
+    const BRIDGE_URL = "https://curly-succotash-x56r9jgjg7662679g-5000.app.github.dev/get_session";
+
     window.onload = () => {
         document.getElementById('apiKey').value = localStorage.getItem('tradier_key') || "";
         const saved = JSON.parse(localStorage.getItem('detector_params'));
-        if(saved) {
-            params = saved;
-            Object.keys(params).forEach(k => {
-                const el = document.getElementById(`param-${k}`);
-                if(el) {
-                    if(el.type === 'checkbox') el.checked = params[k];
-                    else { el.value = params[k]; document.getElementById(`val-${k}`).innerText = params[k]; }
-                }
-            });
-        }
+        if(saved) params = saved;
     };
 
-    function saveKeys() { localStorage.setItem('tradier_key', document.getElementById('apiKey').value); alert("API Key Stored."); }
+    function saveKeys() { localStorage.setItem('tradier_key', document.getElementById('apiKey').value); alert("API Key Saved."); }
 
     function updateParams() {
         params.ofiEntry = parseFloat(document.getElementById('param-ofiEntry').value);
         params.ofiExit = parseFloat(document.getElementById('param-ofiExit').value);
         params.vwapMax = parseFloat(document.getElementById('param-vwapMax').value);
-        params.spreadEnabled = document.getElementById('param-spreadEnabled')?.checked || false;
+        params.spreadEnabled = document.getElementById('param-spreadEnabled').checked;
         params.maxSpread = parseFloat(document.getElementById('param-maxSpread').value);
         Object.keys(params).forEach(k => { if(document.getElementById(`val-${k}`)) document.getElementById(`val-${k}`).innerText = params[k]; });
         localStorage.setItem('detector_params', JSON.stringify(params));
     }
 
-    // 2. The Engine (Auto-Handshake Logic)
     async function startEngine() {
         if(engineActive) return;
         const mode = document.getElementById('dataSource').value;
         const key = document.getElementById('apiKey').value;
-        const input = document.getElementById('tickerInput').value.toUpperCase();
-        const symbols = input.split(/[\s,]+/).filter(s => s.length > 0);
+        const symbols = document.getElementById('tickerInput').value.toUpperCase().split(/[\s,]+/).filter(s => s.length > 0);
         
-        if(mode === 'live' && !key) return alert("Enter Tradier API Key for Live Mode.");
-
         symbols.forEach(sym => {
             if(!tickers[sym]) {
-                let base = 180; if(sym==='SPY') base=520; if(sym==='NVDA') base=900; if(sym==='AAL') base=15;
-                tickers[sym] = { symbol: sym, price: base, open: 0, high: 0, low: 99999, bid: 0, ask: 0, ofi: 0, vwap: base, state: 'BULLPEN', promos: 0, totalTime: 0 };
+                let base = 180; if(sym==='SPY') base=520; if(sym==='NVDA') base=900;
+                tickers[sym] = { 
+                    symbol: sym, price: base, open: 0, high: 0, low: 99999, bid: 0, ask: 0, ofi: 0, vwap: base, 
+                    state: 'BULLPEN', promos: 0, totalTime: 0, 
+                    ofiSum: 0, ofiTicks: 0 // For Average Calculation
+                };
             }
         });
 
@@ -143,7 +133,7 @@
         document.getElementById('pauseBtn').disabled = false;
 
         if (mode === 'live') {
-            document.getElementById('conn-status').innerText = "Requesting Session...";
+            document.getElementById('conn-status').innerText = "Connecting Cloud...";
             const sid = await fetchSessionId(key);
             if(sid) connectWebSocket(sid, symbols);
             else pauseEngine();
@@ -155,15 +145,14 @@
 
     async function fetchSessionId(key) {
         try {
-            const response = await fetch('https://api.tradier.com/v1/markets/events/session', {
-                method: 'POST', headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json' }
+            const response = await fetch(BRIDGE_URL, {
+                method: 'POST',
+                headers: { 'Authorization': `Bearer ${key}`, 'Accept': 'application/json' }
             });
             const data = await response.json();
-            const sid = data.stream.sessionid;
-            document.getElementById('sessionIdDisplay').value = sid;
-            return sid;
+            return data.stream.sessionid;
         } catch (e) {
-            alert("CORS ERROR: Browser blocked the API request. Please enable the 'Allow CORS' extension.");
+            alert("BRIDGE ERROR: Ensure Codespace is running and Port 5000 is PUBLIC.");
             return null;
         }
     }
@@ -190,8 +179,7 @@
     function processSimData() {
         Object.keys(tickers).forEach(sym => {
             let t = tickers[sym];
-            const drift = (Math.random() - 0.5) * 0.15;
-            t.price = (parseFloat(t.price) + drift).toFixed(2);
+            t.price = (parseFloat(t.price) + (Math.random()-0.5)*0.15).toFixed(2);
             t.ofi = (Math.random() * 10 - 5).toFixed(2);
             t.bid = (t.price - 0.01).toFixed(2); t.ask = (parseFloat(t.price) + 0.02).toFixed(2);
             processTickerLogic(sym);
@@ -199,14 +187,63 @@
     }
 
     function processTickerLogic(sym) {
-        let t = tickers[sym];
-        if(t.open === 0) t.open = t.price;
+        let t = tickers[sym]; if(t.open === 0) t.open = t.price;
         t.spread = (t.ask - t.bid).toFixed(2);
         const dist = Math.abs(((t.price - t.vwap) / t.vwap) * 100);
         const spreadOk = !params.spreadEnabled || (t.spread <= params.maxSpread);
 
         if(Math.abs(t.ofi) >= params.ofiEntry && dist <= params.vwapMax && spreadOk && t.state === 'BULLPEN') {
             t.state = 'ARENA'; t.promos++; t.lastEntry = new Date(); t.high = t.price; t.low = t.price;
+            t.ofiSum = 0; t.ofiTicks = 0; // Reset average counters on entry
             sessionLog.push({ sym, type: 'ENTRY', price: t.price, time: t.lastEntry.toLocaleTimeString() });
         } else if (Math.abs(t.ofi) < params.ofiExit && t.state === 'ARENA') {
-            t.state = 'B
+            const avgOfi = (t.ofiSum / t.ofiTicks).toFixed(2);
+            t.state = 'BULLPEN';
+            const dur = Math.round((new Date() - t.lastEntry) / 1000); t.totalTime += dur;
+            sessionLog.push({ sym, type: 'EXIT', price: t.price, high: t.high, low: t.low, time: new Date().toLocaleTimeString(), duration: dur, avgOfi: avgOfi });
+        }
+        
+        if(t.state === 'ARENA') { 
+            if(t.price > t.high) t.high = t.price; if(t.price < t.low) t.low = t.price; 
+            t.ofiSum += parseFloat(t.ofi); t.ofiTicks++; // Accumulate for average
+        }
+        render();
+    }
+
+    function render() {
+        const aBody = document.getElementById('arena-body'); const bBody = document.getElementById('bullpen-body');
+        aBody.innerHTML = ''; bBody.innerHTML = '';
+        Object.values(tickers).forEach(t => {
+            const pct = t.open ? (((t.price - t.open) / t.open) * 100).toFixed(2) : "0.00";
+            const row = `<td class="ticker-col">${t.symbol}</td><td class="price-col">$${t.price}</td><td class="range-col">${t.low}/${t.high}</td><td style="color:${pct>=0?'var(--accent-green)':'var(--accent-magenta)'}">${pct}%</td><td>${t.spread}</td>
+                <td><div class="ofi-meter"><div class="ofi-fill" style="width:${Math.abs(t.ofi)*10}%; background:${t.ofi>0?'var(--accent-green)':'var(--accent-magenta)'}; left:${t.ofi>0?'50%':'auto'}; right:${t.ofi<0?'50%':'auto'}"></div></div></td>
+                <td>${t.state==='ARENA' ? '<button class="btn btn-dim" style="font-size:0.7rem" onclick="navigator.clipboard.writeText(\''+t.symbol+'\')">COPY</button>' : ''}</td>`;
+            if(t.state === 'ARENA') {
+                const tr = document.createElement('tr'); tr.className = t.ofi > 0 ? 'promoted' : 'promoted bearish'; tr.innerHTML = row; aBody.appendChild(tr);
+            } else {
+                const tr = document.createElement('tr'); tr.innerHTML = row + `<td>${t.promos} Pr / ${Math.floor(t.totalTime/60)}m</td>`; bBody.appendChild(tr);
+            }
+        });
+        document.getElementById('clock').innerText = new Date().toLocaleTimeString();
+    }
+
+    function pauseEngine() { engineActive = false; clearInterval(streamInterval); if(socket) socket.close(); document.getElementById('startBtn').disabled = false; document.getElementById('conn-status').innerText = "Paused"; }
+
+    function manualExport() {
+        let csv = "Ticker,Event,Price,Time,High,Low,Duration,AvgOFI\n";
+        sessionLog.forEach(l => csv += `${l.sym},${l.type},${l.price},${l.time},${l.high||''},${l.low||''},${l.duration||''},${l.avgOfi||''}\n`);
+        const blob = new Blob([csv], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a'); a.download = `Session_${new Date().toISOString().slice(0,10)}.csv`; a.href = url; a.click();
+        isDataBackedUp = true; document.getElementById('eraseBtn').disabled = false; document.getElementById('eraseBtn').style.opacity = "1";
+    }
+
+    function eraseLog() {
+        if(confirm("Erase all data?")) {
+            sessionLog = []; Object.keys(tickers).forEach(s => { tickers[s].promos = 0; tickers[s].totalTime = 0; });
+            isDataBackedUp = false; document.getElementById('eraseBtn').disabled = true; render();
+        }
+    }
+</script>
+</body>
+</html>
